@@ -1,29 +1,14 @@
-/*
- *	File	: pc.c
- *
- *	Title	: Demo Producer/Consumer.
- *
- *	Short	: A solution to the producer consumer problem using
- *		pthreads.	
- *
- *	Long 	:
- *
- *	Author	: Andrae Muys
- *
- *	Date	: 18 September 1997
- *
- *	Revised	:
- */
-
 #include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <math.h>
+
 
 #define QUEUESIZE 10
-#define LOOP 20
+#define LOOP 10
 #define P 10
-#define Q 9
+#define Q 6
 
 void *producer (void *args);
 void *consumer (void *args);
@@ -31,7 +16,7 @@ void *consumer (void *args);
 struct workFunction {
   void * (*work)(void *);
   void * arg;
-}
+};
 
 typedef struct {
   struct workFunction buf[QUEUESIZE];
@@ -46,13 +31,14 @@ void* calculate_sin(void* arg){
    for(int i=0; i<10; i++){
       printf("Thread %ld: sin(%.3f) = %.4f\n", pthread_self(), angles[i], sin(angles[i]));
    }
-   return NULL 
+   free(angles);
+   return NULL;
 }
 
 queue *queueInit (void);
 void queueDelete (queue *q);
-void queueAdd (queue *q, int in);
-void queueDel (queue *q, int *out);
+void queueAdd (queue *q, struct workFunction in);
+void queueDel (queue *q, struct workFunction *out);
 
 int main ()
 {
@@ -67,14 +53,18 @@ int main ()
 
   for(int i=0; i<P; i++){
     pthread_create (&pro[i], NULL, producer, fifo);
-    pthread_join (pro[i], NULL);
   }
   
   for(int j=0; j<Q; j++){
     pthread_create (&con[j], NULL, consumer, fifo);
-    pthread_join (con[j], NULL);
   }
-  
+
+   for(int i=0; i<P; i++){
+    pthread_join (pro[i], NULL);
+  }
+	
+  puts("Producers executed!");
+  sleep(5);
   queueDelete (fifo);
 
   return 0;
@@ -83,18 +73,25 @@ int main ()
 void *producer (void *q)
 {
   queue *fifo;
-  int i;
-
+	
   fifo = (queue *)q;
 
-  for (i = 0; i < LOOP; i++) {
-    // produce something ...
+  for (int i = 0; i < LOOP; i++) {
+    double *angles = malloc(10*sizeof(double));
+
+	for (int j = 0; j < LOOP; j++) {
+		angles[j] =(double)rand()/ RAND_MAX;
+	}
+
+	struct workFunction job;
+	job.work = calculate_sin;
+	job.arg=angles;
     pthread_mutex_lock (fifo->mut);
     while (fifo->full) {
       printf ("producer: queue FULL.\n");
       pthread_cond_wait (fifo->notFull, fifo->mut);
     }
-    queueAdd (fifo, i);
+    queueAdd (fifo, job);
     pthread_mutex_unlock (fifo->mut);
     pthread_cond_signal (fifo->notEmpty);
   }
@@ -105,20 +102,22 @@ void *producer (void *q)
 void *consumer (void *q)
 {
   queue *fifo;
-  int i, d;
-
   fifo = (queue *)q;
-
+  struct workFunction job;
+	
   while(1){
     pthread_mutex_lock (fifo->mut);
     while (fifo->empty) {
       printf ("consumer: queue EMPTY.\n");
       pthread_cond_wait (fifo->notEmpty, fifo->mut);
     }
-    queueDel (fifo, &d);
+    queueDel (fifo, &job);
     pthread_mutex_unlock (fifo->mut);
     pthread_cond_signal (fifo->notFull);
-    printf ("consumer: received %d.\n", d);  
+
+	printf ("consumer: Received job!.\n");  
+  	job.work(job.arg);
+
   }
   return (NULL);
 }
@@ -165,7 +164,7 @@ void queueDelete (queue *q)
   free (q);
 }
 
-void queueAdd (queue *q, int in)
+void queueAdd (queue *q, struct workFunction in)
 {
   q->buf[q->tail] = in;
   q->tail++;
@@ -181,7 +180,7 @@ void queueAdd (queue *q, int in)
   return;
 }
 
-void queueDel (queue *q, int *out)
+void queueDel (queue *q, struct workFunction *out)
 {
   *out = q->buf[q->head];
 
